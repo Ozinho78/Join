@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+<body>
+  
+  <p id="text">This is an example of counting the spaces in a string</p>
+  <p id="countSpaces"></p>
+
+  <script>
+    
+      let str = document.getElementById("text").innerText;
+      let spaceCount = (str.split(" ").length - 1);
+      document.getElementById("countSpaces").innerHTML = "Count: " + spaceCount;
+  
+      // var str = "This is an example of spaces in   string";
+      // var numOfSpaces = str.split(" ").length - 1;
+      // console.log(numOfSpaces);
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+
+.icon-key { *zoom: expression( this.runtimeStyle['zoom'] = '1', this.innerHTML = '&#x2022;&nbsp;'); }

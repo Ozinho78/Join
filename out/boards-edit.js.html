@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: boards-edit.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: boards-edit.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/*
+    Author: Martin Reifschneider
+*/
+
+
+import { highlightActiveUser, setPriorityColor } from "./add-task.js";
+import { setDetailedCard } from "./boards-overlay.js";
+import { setUserInitial } from "./boards.js";
+import { getDetailedEditableCard, getDisplaySubtaskMask, editCardSubtask, getSubtaskInput, addLinkedItem } from './boards-edit-template.js';
+import { getDetailedCard } from "./boards-overlay-template.js";
+import { checkedBoxSVG, uncheckedBoxSVG } from "./svg-template.js";
+import { validateDate } from "./add-task-parts.js";
+let toggleContactList = false;
+let formData = [];
+export function toggleContactListToFalse() { toggleContactList = false; }
+
+/**
+ * Help Function to generate string ID into numbered id
+ *
+ * @export
+ * @param {*} taskId
+ * @returns {*}
+ */
+export function parseTaskIdToNumberId(taskId) {
+    let splitId = taskId.split('taskId');
+    return parseInt(splitId[1]);
+}
+
+/**
+ * Function which set editable task card and display into overlayed screen
+ *
+ * @export
+ * @param {*} taskId
+ */
+export function setDetailedEditableCard(taskId) {
+    let id = parseTaskIdToNumberId(taskId);    
+    if(taskId == "") id = (parseTaskIdToNumberId(document.querySelector('.detailed-card').getAttribute('id')));
+    let detailedCard = document.querySelector('.detailed-card');
+    
+    if(formData.length &lt; 1) {
+        detailedCard.querySelector('.input-edit-headline').value = tasksFromFirebase[id].Title;
+        detailedCard.querySelector('.textarea-edit-description').innerHTML = tasksFromFirebase[id].Description;
+        detailedCard.querySelector('.due-date').value = tasksFromFirebase[id].Date;
+    }
+    else updateFormData();
+    detailedCard.querySelector('.add-task-card-persons').innerHTML = setUserInitial(tasksFromFirebase[id], true, true);
+    setPriorityColor(".detailed-card", tasksFromFirebase[id]);
+    if(tasksFromFirebase[id].Subtasks != null) displayCardSubtasks(tasksFromFirebase[id].Subtasks, id);
+}
+
+/**
+ * Function which select priority it displayed as three buttons
+ * Urgent   |   Medium      |   Low
+ *
+ * @param {*} taskId
+ * @param {*} priority
+ */
+function selectPriority(taskId, priority) {
+    let id = parseTaskIdToNumberId(taskId);
+    tasksFromFirebase[id].Priority = priority;
+    document.querySelector('.overlay').innerHTML = getDetailedEditableCard(taskId);
+    setDetailedEditableCard(taskId);
+    getFormData();
+    updateFormData();
+}
+
+/**
+ * Function to close editable task card -> button
+ * it retruns to first detailed task card
+ *
+ * @param {*} taskId
+ */
+function cancelEdit(taskId) {
+    let overlay = document.querySelector('.overlay');
+    overlay.innerHTML = getDetailedCard(taskId);
+    let id = parseTaskIdToNumberId(taskId);
+    setDetailedCard(id);
+}
+
+/** Function which update all user changes of editable task card */
+function updateFormData() {
+    document.querySelector('#input-edit-headline').value = formData[0];
+    document.querySelector('#textarea-edit-description').value = formData[1];
+    document.querySelector('#due-date').value = formData[2];
+}
+
+/** Function which save all user changes of editable task card  */
+function getFormData() {
+    formData = [];
+    formData.push(document.querySelector('#input-edit-headline').value);
+    formData.push(document.querySelector('#textarea-edit-description').value);
+    formData.push(document.querySelector('#due-date').value);    
+}
+
+
+/**
+ * Function which close editable task card but store all informations into
+ * firebase
+ *
+ * @param {*} taskId
+ */
+function closeEdit(taskId) {
+    let id = parseTaskIdToNumberId(taskId);
+    const d = new Date(document.getElementById('due-date').value);
+    let date = document.getElementById('due-date').value = (validateDate(d) == "") ? tasksFromFirebase[id].Date : document.getElementById('due-date').value;
+    if(date == "") {
+        document.getElementById('due-date').setCustomValidity('Date is in the past!');
+        return;
+    } 
+    getFormData();
+    tasksFromFirebase[id].Title = formData[0];
+    tasksFromFirebase[id].Description = formData[1];
+    tasksFromFirebase[id].Date = formData[2];
+    putData(TASKS_DIR, tasksFromFirebase);
+    document.querySelector('.overlay').innerHTML = getDetailedCard(taskId);
+    setDetailedCard(id);
+    assign = null;
+}
+
+
+/**
+ * Help function to find contact persons
+ *
+ * @param {*} data
+ * @param {*} searchString
+ * @returns {boolean}
+ */
+function findPersons(data, searchString) {
+    if(data == null) return false;
+    for (let index = 0; index &lt; data.length; index++) {
+        if (data[index] === searchString) return true;
+    }
+    return false;
+}
+
+/**
+ * Function to remove added contacts
+ *
+ * @param {*} data
+ * @param {*} elementToRemove
+ * @returns {*}
+ */
+function removePerson(data, elementToRemove) {
+    data.forEach((item, index) => {
+        if (item === elementToRemove) {
+            data.splice(index, 1);
+        }
+    });
+    return data;
+}
+
+
+/**
+ * Function to check or uncheck selected contacts
+ *
+ * @export
+ * @param {*} element
+ * @param {*} taskId
+ * @returns {*}
+ */
+export function isChecked(element, taskId) {
+    let id = parseTaskIdToNumberId(taskId);
+    if (findPersons(tasksFromFirebase[id].Persons, element.email)) return checkedBoxSVG();
+    return uncheckedBoxSVG();
+}
+
+/**
+ * Function which open or close contact select box
+ *
+ * @param {*} index
+ * @param {*} taskId
+ */
+function chooseContact(index, taskId) {
+    let id = parseTaskIdToNumberId(taskId);
+    if (!findPersons(tasksFromFirebase[id].Persons, contactsFromFirebase[index].email)) {
+        if(tasksFromFirebase[id].Persons == null) tasksFromFirebase[id]['Persons'] = [contactsFromFirebase[index].email];
+        else tasksFromFirebase[id].Persons.push(contactsFromFirebase[index].email);
+        openContactSelectBox(taskId);
+    }
+    else {
+        removePerson(tasksFromFirebase[id].Persons, contactsFromFirebase[index].email);
+        openContactSelectBox(taskId);
+    }
+}
+
+/**
+ * Help function to compare all contacts with active user
+ *
+ * @export
+ * @param {*} element
+ * @returns {boolean}
+ */
+export function getActiveUser(element) {
+    if (element.email === activeUser[0].email) return true;
+    return false;
+}
+
+
+/**
+ * Function to focus contact select box because sometimes by scrolling
+ * it will scrolling task card body and not select box body
+ *
+ * @param {*} active
+ */
+function focusUserSelectBox(active) {
+    let container = document.querySelector('.detailed-card-editable-container');
+    if(container == null) return;
+    if (active) {
+        container.classList.remove('auto-overflow-y');
+        container.classList.add('hidden-overflow-y');
+        container.scrollTo(0, 600);
+    }
+    else {
+        container.classList.add('auto-overflow-y');
+        container.classList.remove('hidden-overflow-y');
+    }
+}
+
+
+/**
+ * Open contact select box for selecting contacts into task card
+ *
+ * @param {*} taskId
+ */
+function openContactSelectBox(taskId) {
+    focusUserSelectBox(true);
+    let assignBox = document.querySelector('.assign-to-select-box > span');
+    assignBox.innerHTML = "|";
+    let persons = document.querySelector('.add-task-card-persons');
+    persons.classList.add('set-height-140px');
+    
+    persons.innerHTML = "";
+    contactsFromFirebase.forEach((element, index) => {
+        persons.innerHTML += addLinkedItem(element, index, taskId);
+        if(getActiveUser(element)) {
+            highlightActiveUser(`.username${index}`, true);
+            document.querySelector(`.username${index}`).innerHTML = `${element.firstName} ${element.lastName} (you)`;
+        }
+        else highlightActiveUser(`.username${index}`, false);
+    });
+}
+
+
+/**
+ * Function to close contact select box
+ *
+ * @param {*} taskId
+ */
+export function closeContactSelectBox(taskId) {
+    focusUserSelectBox(false);
+    let assignBox = document.querySelector('.assign-to-select-box > span');
+    if(assignBox == null) return;
+    assignBox.innerHTML = "Select contacts to assign";
+    let persons = document.querySelector('.add-task-card-persons');
+    if(persons == null) return;
+    persons.classList.remove('set-height-140px');
+    persons.innerHTML = "";
+    document.getElementById('assign-to-toggle-icon').style.transform = "rotate(0deg)";   
+    setDetailedEditableCard(taskId);
+}
+
+
+/**
+ * Toggle function for open or close contact select box
+ *
+ * @param {*} taskId
+ */
+async function assignContact(taskId) {
+    toggleContactList = !toggleContactList;
+    if (toggleContactList) {
+        contactsFromFirebase = await loadData(CONTACTS_DIR);
+        openContactSelectBox(taskId);
+        document.getElementById('assign-to-toggle-icon').style.transform = "rotate(180deg)";
+    }
+    else {
+        closeContactSelectBox(taskId);
+        document.getElementById('assign-to-toggle-icon').style.transform = "rotate(0deg)";        
+    }
+
+}
+
+/**
+ * Template for subtasks without -> input field
+ *
+ * @export
+ * @param {*} taskId
+ * @returns {string}
+ */
+export function getSubtaskMask(taskId) {
+    return /*html*/`
+        &lt;div onclick="addSubtask('${taskId}')" class="subtasks-add-box p-right-8px clickable">
+            &lt;span class="mg-left-8px">Add new subtask&lt;/span>
+            &lt;img class="click-item size-16px" src="../assets/icons/subtasks_plus.svg" alt="">
+        &lt;/div>
+    `;
+}
+
+/**
+ * Function to push subtask into list and show on task card
+ *
+ * @param {*} taskId
+ */
+function pushSubtask(taskId) {
+    let subtaskId = document.querySelector('.detailed-task-card-subtasks').getAttribute('id');
+    let getId = subtaskId.split('-');    
+    let id = parseTaskIdToNumberId(getId[0]);
+    let input = document.querySelector('#add-new-subtask').value;
+    if (input == "") { cancelSubtask(); return; }
+    if (tasksFromFirebase[id].Subtasks) tasksFromFirebase[id].Subtasks.push({ "Description": input, "Done": false });
+    else tasksFromFirebase[id]["Subtasks"] = [{ "Description": input, "Done": false }];
+    document.querySelector('.detailed-task-card-subtasks').innerHTML = getSubtaskMask(taskId);
+    displayCardSubtasks(tasksFromFirebase[id].Subtasks, id, 'boards');
+}
+
+
+/** Function to cancel subtask box -> button*/
+function cancelSubtask() {
+    let detailedCard = document.querySelector('.detailed-task-card-subtasks');
+    if(detailedCard == null) return;
+    let subtaskId = document.querySelector('.detailed-task-card-subtasks').getAttribute('id');
+    if(subtaskId == null) return;
+    let container = document.querySelector(`#${subtaskId}`);    
+    container.innerHTML = getSubtaskMask();
+}
+
+/**
+ * Function for add subtask -> button
+ *
+ * @param {*} taskId
+ */
+function addSubtask(taskId) {
+    let container = document.querySelector('.detailed-task-card-subtasks');
+    container.innerHTML = getSubtaskInput(taskId);
+    document.getElementById('add-new-subtask').addEventListener("keypress", event => { if(event.key == "Enter") pushSubtask(taskId); });
+}
+
+
+/**
+ * Function for remove subtask -> button
+ *
+ * @param {*} taskId
+ * @param {*} index
+ */
+function removeCardSubtask(taskId,index) {           
+    tasksFromFirebase[taskId].Subtasks.splice(index, 1);
+    putData(TASKS_DIR, tasksFromFirebase);
+    displayCardSubtasks(tasksFromFirebase[taskId].Subtasks, taskId);
+}
+
+/**
+ * Function for save added subtask -> button
+ *
+ * @param {*} taskId
+ * @param {*} index
+ */
+function saveSubtaskCardEdit(taskId, index) {
+    let subtaskInput = document.getElementById(`added-subtask-input${index}`).value;
+    if(tasksFromFirebase[taskId].Subtasks == null) tasksArray[taskId].Subtasks = [{Description: subtaskInput, Done: false }];
+    else if(subtaskInput !== "") tasksFromFirebase[taskId].Subtasks[index].Description = subtaskInput;
+    putData(TASKS_DIR, tasksFromFirebase);
+    displayCardSubtasks(tasksFromFirebase[taskId].Subtasks, taskId);
+}
+
+
+/**
+ * Function for display all added or not added subtasks
+ *
+ * @param {*} subtasks
+ * @param {*} id
+ */
+function displayCardSubtasks(subtasks, id) {
+    let subtaskDisplay = document.querySelector('.added-subtasks');
+    subtaskDisplay.innerHTML = "";
+    
+    subtasks.forEach((element, index) => {
+        subtaskDisplay.innerHTML += getDisplaySubtaskMask(element, id, index);
+    });
+}
+
+
+window.selectPriority = selectPriority;
+window.closeEdit = closeEdit;
+window.assignContact = assignContact;
+window.chooseContact = chooseContact;
+window.addSubtask = addSubtask;
+window.cancelSubtask = cancelSubtask;
+window.pushSubtask = pushSubtask;
+window.cancelEdit = cancelEdit;
+window.displayCardSubtasks = displayCardSubtasks;
+window.saveSubtaskCardEdit = saveSubtaskCardEdit;
+window.removeCardSubtask = removeCardSubtask;
+window. editCardSubtask = editCardSubtask;
+window.getFormData = getFormData;
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#addBoardEditListener">addBoardEditListener</a></li><li><a href="global.html#addCategory">addCategory</a></li><li><a href="global.html#addContact">addContact</a></li><li><a href="global.html#addContactColor">addContactColor</a></li><li><a href="global.html#addLinkedItem">addLinkedItem</a></li><li><a href="global.html#addListener">addListener</a></li><li><a href="global.html#addNewContact">addNewContact</a></li><li><a href="global.html#addNewContactSection">addNewContactSection</a></li><li><a href="global.html#addNewSubtask">addNewSubtask</a></li><li><a href="global.html#addSubtask">addSubtask</a></li><li><a href="global.html#addUser">addUser</a></li><li><a href="global.html#addUserItem">addUserItem</a></li><li><a href="global.html#animateSuccessMessage">animateSuccessMessage</a></li><li><a href="global.html#assignContact">assignContact</a></li><li><a href="global.html#assignContactData">assignContactData</a></li><li><a href="global.html#calculateDoneSubtasks">calculateDoneSubtasks</a></li><li><a href="global.html#cancelEdit">cancelEdit</a></li><li><a href="global.html#cancelSubtask">cancelSubtask</a></li><li><a href="global.html#checkBoundingTask">checkBoundingTask</a></li><li><a href="global.html#checkContactEmail">checkContactEmail</a></li><li><a href="global.html#checkCorrectPassword">checkCorrectPassword</a></li><li><a href="global.html#checkCountSpaces">checkCountSpaces</a></li><li><a href="global.html#checkDone">checkDone</a></li><li><a href="global.html#checkDropzoneBounding">checkDropzoneBounding</a></li><li><a href="global.html#checkEmptyColumns">checkEmptyColumns</a></li><li><a href="global.html#checkForm">checkForm</a></li><li><a href="global.html#checkIfContactUser">checkIfContactUser</a></li><li><a href="global.html#checkIfMobileSize">checkIfMobileSize</a></li><li><a href="global.html#checkIfOpenedContactIsActiveUser">checkIfOpenedContactIsActiveUser</a></li><li><a href="global.html#checkMousemoveBounding">checkMousemoveBounding</a></li><li><a href="global.html#checkScreenSize">checkScreenSize</a></li><li><a href="global.html#checkUserPassword">checkUserPassword</a></li><li><a href="global.html#checkValue">checkValue</a></li><li><a href="global.html#checkedBoxSVG">checkedBoxSVG</a></li><li><a href="global.html#chooseCategory">chooseCategory</a></li><li><a href="global.html#chooseContact">chooseContact</a></li><li><a href="global.html#clearButton">clearButton</a></li><li><a href="global.html#clearColumns">clearColumns</a></li><li><a href="global.html#clearHighlightedTasks">clearHighlightedTasks</a></li><li><a href="global.html#clearTimeouts">clearTimeouts</a></li><li><a href="global.html#closeCategory">closeCategory</a></li><li><a href="global.html#closeContactDialog">closeContactDialog</a></li><li><a href="global.html#closeContactInfo">closeContactInfo</a></li><li><a href="global.html#closeContactInfoMobile">closeContactInfoMobile</a></li><li><a href="global.html#closeContactSelectBox">closeContactSelectBox</a></li><li><a href="global.html#closeContacts">closeContacts</a></li><li><a href="global.html#closeEdit">closeEdit</a></li><li><a href="global.html#closeOverlay">closeOverlay</a></li><li><a href="global.html#colorTouchedColumn">colorTouchedColumn</a></li><li><a href="global.html#createNewTask">createNewTask</a></li><li><a href="global.html#deleteContact">deleteContact</a></li><li><a href="global.html#deleteTask">deleteTask</a></li><li><a href="global.html#deleteUser">deleteUser</a></li><li><a href="global.html#displayAddedUser">displayAddedUser</a></li><li><a href="global.html#displayCardSubtasks">displayCardSubtasks</a></li><li><a href="global.html#displayHTML">displayHTML</a></li><li><a href="global.html#displaySubtasks">displaySubtasks</a></li><li><a href="global.html#editCardSubtask">editCardSubtask</a></li><li><a href="global.html#editSVG">editSVG</a></li><li><a href="global.html#editSubtask">editSubtask</a></li><li><a href="global.html#editTask">editTask</a></li><li><a href="global.html#emailNotExists">emailNotExists</a></li><li><a href="global.html#enableButtonAfterChecked">enableButtonAfterChecked</a></li><li><a href="global.html#everyInputFieldFilled">everyInputFieldFilled</a></li><li><a href="global.html#fillInputFields">fillInputFields</a></li><li><a href="global.html#filterByNestedKeyAndArray">filterByNestedKeyAndArray</a></li><li><a href="global.html#findInitials">findInitials</a></li><li><a href="global.html#findPersons">findPersons</a></li><li><a href="global.html#focusUserSelectBox">focusUserSelectBox</a></li><li><a href="global.html#formatDate">formatDate</a></li><li><a href="global.html#getActiveUser">getActiveUser</a></li><li><a href="global.html#getCategory">getCategory</a></li><li><a href="global.html#getCloseSVG">getCloseSVG</a></li><li><a href="global.html#getColumn">getColumn</a></li><li><a href="global.html#getContactHTML">getContactHTML</a></li><li><a href="global.html#getContactInfoTemplate">getContactInfoTemplate</a></li><li><a href="global.html#getDeadlineDay">getDeadlineDay</a></li><li><a href="global.html#getDeadlineMonth">getDeadlineMonth</a></li><li><a href="global.html#getDeadlineYear">getDeadlineYear</a></li><li><a href="global.html#getDetailedCard">getDetailedCard</a></li><li><a href="global.html#getDetailedEditableCard">getDetailedEditableCard</a></li><li><a href="global.html#getDisplaySubtaskMask">getDisplaySubtaskMask</a></li><li><a href="global.html#getEmptyColumn">getEmptyColumn</a></li><li><a href="global.html#getFormData">getFormData</a></li><li><a href="global.html#getGreetingTemplate">getGreetingTemplate</a></li><li><a href="global.html#getGroupInitials">getGroupInitials</a></li><li><a href="global.html#getGroupUserInitials">getGroupUserInitials</a></li><li><a href="global.html#getInputForm">getInputForm</a></li><li><a href="global.html#getLowSVG">getLowSVG</a></li><li><a href="global.html#getMediumSVG">getMediumSVG</a></li><li><a href="global.html#getNearestDate">getNearestDate</a></li><li><a href="global.html#getNewSectionHTML">getNewSectionHTML</a></li><li><a href="global.html#getNumberDoneTasks">getNumberDoneTasks</a></li><li><a href="global.html#getNumberTasksAwaitingFeedback">getNumberTasksAwaitingFeedback</a></li><li><a href="global.html#getNumberTasksInProgress">getNumberTasksInProgress</a></li><li><a href="global.html#getNumberToDoTasks">getNumberToDoTasks</a></li><li><a href="global.html#getNumberUrgentTasks">getNumberUrgentTasks</a></li><li><a href="global.html#getOverlay">getOverlay</a></li><li><a href="global.html#getPerson">getPerson</a></li><li><a href="global.html#getPriority">getPriority</a></li><li><a href="global.html#getProgressBar">getProgressBar</a></li><li><a href="global.html#getSubtaskInput">getSubtaskInput</a></li><li><a href="global.html#getSubtaskMask">getSubtaskMask</a></li><li><a href="global.html#getTaskBody">getTaskBody</a></li><li><a href="global.html#getTaskCard">getTaskCard</a></li><li><a href="global.html#getTaskInfos">getTaskInfos</a></li><li><a href="global.html#getTasksInBoard">getTasksInBoard</a></li><li><a href="global.html#getTemplateMainSummary">getTemplateMainSummary</a></li><li><a href="global.html#getUrgentSVG">getUrgentSVG</a></li><li><a href="global.html#getUser">getUser</a></li><li><a href="global.html#getUserColor">getUserColor</a></li><li><a href="global.html#getUserIcon">getUserIcon</a></li><li><a href="global.html#guestLogin">guestLogin</a></li><li><a href="global.html#handleClickOnTask">handleClickOnTask</a></li><li><a href="global.html#handleEnd">handleEnd</a></li><li><a href="global.html#handleSelectCategoryBox">handleSelectCategoryBox</a></li><li><a href="global.html#handleSelectContactBox">handleSelectContactBox</a></li><li><a href="global.html#handleSelectSubtaskButton">handleSelectSubtaskButton</a></li><li><a href="global.html#handleSwipe">handleSwipe</a></li><li><a href="global.html#highlightActiveUser">highlightActiveUser</a></li><li><a href="global.html#highlightColumn">highlightColumn</a></li><li><a href="global.html#highlightResults">highlightResults</a></li><li><a href="global.html#initContacts">initContacts</a></li><li><a href="global.html#initLogin">initLogin</a></li><li><a href="global.html#initSignup">initSignup</a></li><li><a href="global.html#initSummary">initSummary</a></li><li><a href="global.html#isChecked">isChecked</a></li><li><a href="global.html#loadActiveUser">loadActiveUser</a></li><li><a href="global.html#loadAddTask">loadAddTask</a></li><li><a href="global.html#loadBoards">loadBoards</a></li><li><a href="global.html#loadCheckboxStatus">loadCheckboxStatus</a></li><li><a href="global.html#loadData">loadData</a></li><li><a href="global.html#logoutPopup">logoutPopup</a></li><li><a href="global.html#markActiveUser">markActiveUser</a></li><li><a href="global.html#mergeArraysWithoutDuplicates">mergeArraysWithoutDuplicates</a></li><li><a href="global.html#objectIsEmpty">objectIsEmpty</a></li><li><a href="global.html#onScroll">onScroll</a></li><li><a href="global.html#openAddTaskOverlay">openAddTaskOverlay</a></li><li><a href="global.html#openCategory">openCategory</a></li><li><a href="global.html#openContactDialog">openContactDialog</a></li><li><a href="global.html#openContactSelectBox">openContactSelectBox</a></li><li><a href="global.html#openContacts">openContacts</a></li><li><a href="global.html#openOverlay">openOverlay</a></li><li><a href="global.html#openPopup">openPopup</a></li><li><a href="global.html#orderTasks">orderTasks</a></li><li><a href="global.html#parseTaskIdToNumberId">parseTaskIdToNumberId</a></li><li><a href="global.html#prepareMovableObject">prepareMovableObject</a></li><li><a href="global.html#pushEverythingNecessaryToFireBase">pushEverythingNecessaryToFireBase</a></li><li><a href="global.html#pushNewSubtask">pushNewSubtask</a></li><li><a href="global.html#pushNewSubtaskOnPressedEnter">pushNewSubtaskOnPressedEnter</a></li><li><a href="global.html#pushSubtask">pushSubtask</a></li><li><a href="global.html#refresh">refresh</a></li><li><a href="global.html#rememberMeCheck">rememberMeCheck</a></li><li><a href="global.html#removeCardSubtask">removeCardSubtask</a></li><li><a href="global.html#removeHighlightColumn">removeHighlightColumn</a></li><li><a href="global.html#removePerson">removePerson</a></li><li><a href="global.html#removePriorityColor">removePriorityColor</a></li><li><a href="global.html#removeSubtask">removeSubtask</a></li><li><a href="global.html#renderAddContactDialog">renderAddContactDialog</a></li><li><a href="global.html#renderContactList">renderContactList</a></li><li><a href="global.html#renderEditContactDialog">renderEditContactDialog</a></li><li><a href="global.html#resetActiveUser">resetActiveUser</a></li><li><a href="global.html#resetColumn">resetColumn</a></li><li><a href="global.html#resetMovableObject">resetMovableObject</a></li><li><a href="global.html#resetValues">resetValues</a></li><li><a href="global.html#saveIndexesIfEmailInTask">saveIndexesIfEmailInTask</a></li><li><a href="global.html#saveMovedTask">saveMovedTask</a></li><li><a href="global.html#saveSubtaskCardEdit">saveSubtaskCardEdit</a></li><li><a href="global.html#saveSubtaskEdit">saveSubtaskEdit</a></li><li><a href="global.html#search">search</a></li><li><a href="global.html#searchEntry">searchEntry</a></li><li><a href="global.html#selectPriority">selectPriority</a></li><li><a href="global.html#setBgColor">setBgColor</a></li><li><a href="global.html#setCard">setCard</a></li><li><a href="global.html#setCardElements">setCardElements</a></li><li><a href="global.html#setDate">setDate</a></li><li><a href="global.html#setDetailedCard">setDetailedCard</a></li><li><a href="global.html#setDetailedEditableCard">setDetailedEditableCard</a></li><li><a href="global.html#setGroupUser">setGroupUser</a></li><li><a href="global.html#setOpacity">setOpacity</a></li><li><a href="global.html#setPriority">setPriority</a></li><li><a href="global.html#setPriorityColor">setPriorityColor</a></li><li><a href="global.html#setSubtasks">setSubtasks</a></li><li><a href="global.html#setUserInitial">setUserInitial</a></li><li><a href="global.html#setZoom">setZoom</a></li><li><a href="global.html#showContactInfo">showContactInfo</a></li><li><a href="global.html#showData">showData</a></li><li><a href="global.html#showErrorMessage">showErrorMessage</a></li><li><a href="global.html#showGreetingDependingOnDaytime">showGreetingDependingOnDaytime</a></li><li><a href="global.html#showGreetingMobile">showGreetingMobile</a></li><li><a href="global.html#showMainTemplate">showMainTemplate</a></li><li><a href="global.html#signUpUser">signUpUser</a></li><li><a href="global.html#signupSuccess">signupSuccess</a></li><li><a href="global.html#sortContactsByFirstName">sortContactsByFirstName</a></li><li><a href="global.html#toggleActiveBtnColor">toggleActiveBtnColor</a></li><li><a href="global.html#toggleEditMenu">toggleEditMenu</a></li><li><a href="global.html#togglePasswordIcon">togglePasswordIcon</a></li><li><a href="global.html#trashSVG">trashSVG</a></li><li><a href="global.html#uncheckedBoxSVG">uncheckedBoxSVG</a></li><li><a href="global.html#unsetOpacity">unsetOpacity</a></li><li><a href="global.html#updateContactInfo">updateContactInfo</a></li><li><a href="global.html#updateEmailInTasks">updateEmailInTasks</a></li><li><a href="global.html#updateFormData">updateFormData</a></li><li><a href="global.html#updateUserInfo">updateUserInfo</a></li><li><a href="global.html#validateDate">validateDate</a></li><li><a href="global.html#waitForDrag">waitForDrag</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.3</a> on Tue Nov 05 2024 15:06:48 GMT+0100 (Mitteleuropäische Normalzeit)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
